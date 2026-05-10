@@ -269,6 +269,8 @@ class CFDailyPlugin(Star):
         tags = ", ".join(problem.get("tags", []))
         rating = problem.get("rating", "未知")
 
+        corner_image_url = "https://free.picui.cn/free/2026/05/10/6a005b791eeac.png"
+
         statement = await self.fetch_problem_statement(contest_id, index)
         if not statement:
             yield event.plain_result(
@@ -283,36 +285,188 @@ class CFDailyPlugin(Star):
             text = re.sub(r'\$\$\$(.*?)\$\$\$', r'\\(\1\\)', text, flags=re.DOTALL)
             return text
 
-        # ★ 核心修复：剥离 CF 自带的 section-title，再处理公式格式
         description = process_cf_html(statement["description"])
         input_spec = process_cf_html(self._strip_cf_section_titles(statement["input_spec"]))
         output_spec = process_cf_html(self._strip_cf_section_titles(statement["output_spec"]))
         note = process_cf_html(self._strip_cf_section_titles(statement["note"]))
 
-        # 样例 HTML
         samples_html = ""
         if statement["sample_tests"]:
-            samples_html = '<div class="section-title">样例</div>'
             for i, sample in enumerate(statement["sample_tests"]):
                 samples_html += f'''
-                <div class="sample-block">
-                    <div class="sample-title">输入 #{i+1}</div>
-                    <pre>{sample["input"]}</pre>
-                    <div class="sample-title">输出 #{i+1}</div>
-                    <pre>{sample["output"]}</pre>
+                <div class="sample-columns">
+                    <div class="sample-col sample-col-in">
+                        <div class="sample-label label-in">输入 #{i+1}</div>
+                        <pre class="pre-in">{sample["input"]}</pre>
+                    </div>
+                    <div class="sample-col sample-col-out">
+                        <div class="sample-label label-out">输出 #{i+1}</div>
+                        <pre class="pre-out">{sample["output"]}</pre>
+                    </div>
                 </div>'''
 
         tags_html = " ".join(
             [f'<span class="tag">{t.strip()}</span>' for t in tags.split(",") if t.strip()]
         )
 
-        # 尝试翻译
         translated = await self._translate_to_chinese(
             description, input_spec, output_spec, note
         )
         has_translation = translated and any(
             v.strip() for v in translated.values()
         )
+
+        # ============ 公共 CSS ============
+        common_css = r'''
+            html, body {
+                margin: 0; padding: 0;
+                background:
+                    radial-gradient(ellipse at 5% 15%, rgba(195,175,225,0.50) 0%, transparent 45%),
+                    radial-gradient(ellipse at 92% 8%,  rgba(160,195,235,0.40) 0%, transparent 40%),
+                    radial-gradient(ellipse at 10% 85%, rgba(160,210,225,0.30) 0%, transparent 40%),
+                    radial-gradient(ellipse at 88% 88%, rgba(235,200,185,0.35) 0%, transparent 40%),
+                    #f0ecf5;
+                overflow-x: hidden;
+            }
+            body {
+                font-family: "PingFang SC","Segoe UI","Helvetica Neue",Arial,sans-serif;
+                color: #2d2d3a; line-height: 1.6; padding: 32px;
+            }
+
+            /* ★ 卡片：加边框 */
+            .card {
+                background: #fff;
+                border-radius: 22px;
+                border: 1px solid #e0daf0;
+                padding: 40px 44px;
+                max-width: 1200px;
+                margin: 0 auto;
+                box-shadow: 0 4px 32px rgba(0,0,0,0.06);
+                position: relative;
+            }
+
+            .header { margin-bottom: 16px; }
+            .title  { font-size: 30px; font-weight: 800; color: #1a1a2e; margin: 0 0 4px 0; }
+            .subtitle { color: #8b8ba0; font-size: 15px; margin: 0; }
+
+            .info-bar { display: flex; gap: 14px; margin: 18px 0 24px 0; }
+            .info-item {
+                display: flex; align-items: center; gap: 10px;
+                background: #f5f2fc; padding: 10px 20px; border-radius: 14px;
+                border: 1px solid #ede8f5;
+            }
+            .info-icon { width: 22px; height: 22px; color: #9b8fbf; flex-shrink: 0; }
+            .info-text  { display: flex; flex-direction: column; gap: 1px; }
+            .info-label { color: #9b8fbf; font-size: 11px; }
+            .info-value { font-size: 16px; font-weight: 700; color: #2d2d3a; }
+
+            /* 双栏面板 */
+            .dual-container {
+                display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+                margin: 0 0 24px 0;
+                border: 1px solid #ede8f5; border-radius: 16px; overflow: hidden;
+            }
+            .panel { padding: 28px; min-width: 0; }
+            .panel-en { background: #f9f7ff; border-right: 1px solid #ede8f5; }
+            .panel-cn { background: #fffcf8; }
+
+            .panel-badge {
+                display: inline-block; padding: 4px 18px;
+                border-radius: 20px; font-size: 13px;
+                font-weight: 600; margin-bottom: 14px;
+            }
+            .badge-en { background: #e0edfc; color: #4a90d9; }
+            .badge-cn { background: #fde4e4; color: #d94a4a; }
+
+            .section-title {
+                font-size: 17px; font-weight: 700; color: #1a1a2e;
+                margin: 20px 0 8px 0;
+                padding-bottom: 6px; border-bottom: 1px solid rgba(0,0,0,0.06);
+            }
+            .panel .section-title:first-of-type { margin-top: 0; }
+
+            .cf-content p                  { margin: 0 0 12px 0; font-size: 14px; }
+            .cf-content ul, .cf-content ol { margin: 0 0 12px 0; padding-left: 22px; }
+            .cf-content li                 { margin-bottom: 4px; font-size: 14px; }
+
+            pre {
+                border-radius: 10px; padding: 14px;
+                font-family: "Consolas","SF Mono",monospace;
+                font-size: 13px; overflow-x: auto; white-space: pre-wrap;
+                margin: 6px 0 0 0;
+            }
+
+            /* ★ 样例区域 */
+            .samples-section { margin: 4px 0 0 0; }
+            .samples-title {
+                font-size: 18px; font-weight: 700; color: #1a1a2e;
+                margin-bottom: 14px;
+            }
+
+            /* ★ 输入输出左右分开，各自有独立背景和边框 */
+            .sample-columns {
+                display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+                margin-bottom: 14px;
+            }
+            .sample-col { min-width: 0; border-radius: 12px; padding: 14px; }
+
+            .sample-col-in {
+                background: #f5f0ff;
+                border: 1px solid #e0d8f5;
+            }
+            .sample-col-out {
+                background: #f0faf0;
+                border: 1px solid #d0ecd0;
+            }
+
+            .sample-label {
+                display: inline-block;
+                padding: 3px 14px; border-radius: 8px;
+                font-size: 13px; font-weight: 600;
+                margin-bottom: 8px;
+            }
+            .label-in  { background: #e8dff8; color: #7c5cbf; }
+            .label-out { background: #d8f0d8; color: #3a8a3a; }
+
+            .pre-in  { background: #fff; border: 1px solid #e8e0f5; }
+            .pre-out { background: #fff; border: 1px solid #d8eed8; }
+
+            .note-content {
+                background: #f5f2fc; padding: 14px;
+                border-left: 4px solid #9b8fbf;
+                border-radius: 0 10px 10px 0; font-size: 14px;
+            }
+
+            .tags {
+                margin-top: 20px; padding-top: 16px;
+                border-top: 1px solid #ede8f5;
+            }
+            .tag {
+                display: inline-block;
+                background: #f3f0fa; padding: 5px 14px;
+                margin: 0 8px 8px 0; border-radius: 20px;
+                font-size: 13px; color: #6b5b95;
+                border: 1px solid #e8e3f5;
+            }
+
+            .translate-note {
+                text-align: right; font-size: 11px;
+                color: #b0a8c0; margin-top: 16px;
+            }
+
+            /* 右下角图片 */
+            .corner-image {
+                position: absolute;
+                right: -10px;
+                bottom: -10px;
+                width: 180px;
+                height: auto;
+                opacity: 0.85;
+                pointer-events: none;
+                z-index: 1;
+                border-radius: 12px;
+            }
+        '''
 
         # ============ 双栏模板 ============
         if has_translation:
@@ -322,7 +476,7 @@ class CFDailyPlugin(Star):
             note_cn = translated.get("NOTE", "")
 
             note_html_en = (
-                f'<div class="section-title">备注</div>'
+                f'<div class="section-title">Note</div>'
                 f'<div class="note-content cf-content">{note}</div>' if note else ""
             )
             note_html_cn = (
@@ -347,117 +501,43 @@ class CFDailyPlugin(Star):
                     }};
                 </script>
                 <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" id="MathJax-script" async></script>
-                <style>
-                    html, body {{ margin: 0; padding: 0; background-color: #f2f5f8; }}
-                    body {{
-                        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-                        color: #24292e; box-sizing: border-box;
-                        line-height: 1.6; padding: 40px;
-                    }}
-                    .glass-container {{
-                        background: rgba(255,255,255,0.65);
-                        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-                        border-radius: 20px;
-                        border: 1px solid rgba(255,255,255,0.8);
-                        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
-                        padding: 40px; max-width: 1400px; margin: 0 auto;
-                    }}
-                    .header {{
-                        border-bottom: 2px solid rgba(0,0,0,0.05);
-                        padding-bottom: 15px; margin-bottom: 20px;
-                    }}
-                    .title {{ font-size: 28px; font-weight: bold; margin-bottom: 5px; }}
-                    .subtitle {{ color: #586069; font-size: 16px; }}
-                    .info-bar {{
-                        display: flex; gap: 30px;
-                        background: rgba(255,255,255,0.5);
-                        padding: 12px 20px; border-radius: 12px; margin: 20px 0;
-                        border: 1px solid rgba(255,255,255,0.6);
-                    }}
-                    .info-item {{ display: flex; flex-direction: column; }}
-                    .info-label {{ font-size: 12px; color: #6a737d; text-transform: uppercase; }}
-                    .info-value {{ font-size: 18px; font-weight: 600; }}
-                    .dual-container {{
-                        display: grid; grid-template-columns: 1fr 1fr;
-                        gap: 0; margin: 25px 0;
-                        border-radius: 12px; overflow: hidden;
-                        border: 1px solid rgba(0,0,0,0.06);
-                    }}
-                    .panel {{ padding: 25px; min-width: 0; }}
-                    .panel-en {{
-                        background: rgba(255,255,255,0.3);
-                        border-right: 2px solid rgba(0,0,0,0.06);
-                    }}
-                    .panel-cn {{ background: rgba(255,255,255,0.15); }}
-                    .panel-badge {{
-                        display: inline-block; padding: 4px 16px;
-                        border-radius: 20px; font-size: 13px;
-                        font-weight: 600; margin-bottom: 18px;
-                        letter-spacing: 0.5px;
-                    }}
-                    .badge-en {{ background: rgba(59,130,246,0.1); color: #3b82f6; }}
-                    .badge-cn {{ background: rgba(239,68,68,0.1); color: #ef4444; }}
-                    .section-title {{
-                        font-size: 18px; font-weight: bold;
-                        margin: 22px 0 8px 0;
-                        border-bottom: 1px solid rgba(0,0,0,0.05);
-                        padding-bottom: 4px;
-                    }}
-                    .panel .section-title:first-of-type {{ margin-top: 0; }}
-                    .cf-content p {{ margin: 0 0 12px 0; font-size: 14px; }}
-                    .cf-content ul, .cf-content ol {{ margin: 0 0 12px 0; padding-left: 22px; }}
-                    .cf-content li {{ margin-bottom: 4px; font-size: 14px; }}
-                    pre {{
-                        background: rgba(255,255,255,0.7);
-                        border: 1px solid rgba(255,255,255,0.8);
-                        border-radius: 8px; padding: 12px;
-                        font-family: "Consolas", monospace;
-                        font-size: 13px; overflow-x: auto; white-space: pre-wrap;
-                    }}
-                    .sample-block {{ margin-bottom: 18px; }}
-                    .sample-title {{ font-weight: 600; margin: 8px 0 4px 0; }}
-                    .note-content {{
-                        background: rgba(255,255,255,0.6); padding: 12px;
-                        border-left: 4px solid #8e9db0; border-radius: 0 8px 8px 0;
-                    }}
-                    .samples-section {{
-                        margin-top: 25px; padding-top: 15px;
-                        border-top: 2px solid rgba(0,0,0,0.06);
-                    }}
-                    .tags {{
-                        margin-top: 20px; padding-top: 15px;
-                        border-top: 1px solid rgba(0,0,0,0.05);
-                    }}
-                    .tag {{
-                        display: inline-block;
-                        background: rgba(255,255,255,0.8);
-                        padding: 5px 12px; margin: 0 6px 6px 0;
-                        border-radius: 20px; font-size: 13px;
-                        border: 1px solid rgba(255,255,255,0.9);
-                        box-shadow: 0 2px 5px rgba(0,0,0,0.04);
-                    }}
-                    .translate-note {{
-                        text-align: right; font-size: 11px;
-                        color: #9ca3af; margin-top: 15px;
-                    }}
-                </style>
+                <style>{common_css}</style>
             </head>
             <body>
-                <div class="glass-container">
+                <div class="card">
                     <div class="header">
                         <div class="title">{statement["title"]}</div>
-                        <div class="subtitle">Codeforces {contest_id}{index} · 难度分: {rating}</div>
+                        <div class="subtitle">Codeforces {contest_id}{index} · 难度分：{rating}</div>
                     </div>
+
                     <div class="info-bar">
                         <div class="info-item">
-                            <span class="info-label">时间限制</span>
-                            <span class="info-value">{statement["time_limit"]}</span>
+                            <svg class="info-icon" viewBox="0 0 24 24" fill="none"
+                                 stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"/>
+                                <polyline points="12 6 12 12 16 14"/>
+                            </svg>
+                            <div class="info-text">
+                                <span class="info-label">时间限制</span>
+                                <span class="info-value">{statement["time_limit"]}</span>
+                            </div>
                         </div>
                         <div class="info-item">
-                            <span class="info-label">内存限制</span>
-                            <span class="info-value">{statement["memory_limit"]}</span>
+                            <svg class="info-icon" viewBox="0 0 24 24" fill="none"
+                                 stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="3" width="20" height="14" rx="2"/>
+                                <line x1="8" y1="21" x2="16" y2="21"/>
+                                <line x1="12" y1="17" x2="12" y2="21"/>
+                            </svg>
+                            <div class="info-text">
+                                <span class="info-label">内存限制</span>
+                                <span class="info-value">{statement["memory_limit"]}</span>
+                            </div>
                         </div>
                     </div>
+
                     <div class="dual-container">
                         <div class="panel panel-en">
                             <span class="panel-badge badge-en">English</span>
@@ -480,13 +560,19 @@ class CFDailyPlugin(Star):
                             {note_html_cn}
                         </div>
                     </div>
+
                     <div class="samples-section">
+                        <div class="samples-title">✦ 样例</div>
                         {samples_html}
                     </div>
+
                     <div class="tags">
-                        <strong>标签：</strong><br>{tags_html}
+                        <span class="tags-label">标签：</span><br>{tags_html}
                     </div>
+
                     <div class="translate-note">中文翻译由 LLM 自动生成，仅供参考</div>
+
+                    <img class="corner-image" src="{corner_image_url}" alt="decoration"/>
                 </div>
             </body>
             </html>
@@ -494,10 +580,10 @@ class CFDailyPlugin(Star):
 
         # ============ 单栏回退模板 ============
         else:
-            note_html = ""
+            note_html_str = ""
             if note:
-                note_html = (
-                    f'<div class="section-title">备注</div>'
+                note_html_str = (
+                    f'<div class="section-title">Note</div>'
                     f'<div class="note-content cf-content">{note}</div>'
                 )
 
@@ -519,99 +605,63 @@ class CFDailyPlugin(Star):
                 </script>
                 <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" id="MathJax-script" async></script>
                 <style>
-                    html, body {{ margin: 0; padding: 0; background-color: #f2f5f8; }}
-                    body {{
-                        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-                        color: #24292e; box-sizing: border-box;
-                        line-height: 1.6; padding: 40px;
-                    }}
-                    .glass-container {{
-                        background: rgba(255,255,255,0.65);
-                        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-                        border-radius: 20px;
-                        border: 1px solid rgba(255,255,255,0.8);
-                        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
-                        padding: 40px; max-width: 900px; margin: 0 auto;
-                    }}
-                    .header {{
-                        border-bottom: 2px solid rgba(0,0,0,0.05);
-                        padding-bottom: 15px; margin-bottom: 20px;
-                    }}
-                    .title {{ font-size: 28px; font-weight: bold; margin-bottom: 5px; }}
-                    .subtitle {{ color: #586069; font-size: 16px; }}
-                    .info-bar {{
-                        display: flex; gap: 30px;
-                        background: rgba(255,255,255,0.5);
-                        padding: 12px 20px; border-radius: 12px; margin: 20px 0;
-                        border: 1px solid rgba(255,255,255,0.6);
-                    }}
-                    .info-item {{ display: flex; flex-direction: column; }}
-                    .info-label {{ font-size: 12px; color: #6a737d; text-transform: uppercase; }}
-                    .info-value {{ font-size: 18px; font-weight: 600; }}
-                    .section-title {{
-                        font-size: 20px; font-weight: bold;
-                        margin: 25px 0 10px 0;
-                        border-bottom: 1px solid rgba(0,0,0,0.05);
-                        padding-bottom: 5px;
-                    }}
-                    .cf-content p {{ margin: 0 0 15px 0; }}
-                    .cf-content ul, .cf-content ol {{ margin: 0 0 15px 0; padding-left: 25px; }}
-                    .cf-content li {{ margin-bottom: 5px; }}
-                    pre {{
-                        background: rgba(255,255,255,0.7);
-                        border: 1px solid rgba(255,255,255,0.8);
-                        border-radius: 8px; padding: 15px;
-                        font-family: "Consolas", monospace;
-                        font-size: 14px; overflow-x: auto; white-space: pre-wrap;
-                        box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
-                    }}
-                    .sample-block {{ margin-bottom: 20px; }}
-                    .sample-title {{ font-weight: 600; margin: 10px 0 5px 0; }}
-                    .note-content {{
-                        background: rgba(255,255,255,0.6); padding: 15px;
-                        border-left: 4px solid #8e9db0; border-radius: 0 8px 8px 0;
-                    }}
-                    .tags {{
-                        margin-top: 25px; padding-top: 15px;
-                        border-top: 1px solid rgba(0,0,0,0.05);
-                    }}
-                    .tag {{
-                        display: inline-block;
-                        background: rgba(255,255,255,0.8);
-                        padding: 6px 14px; margin: 0 8px 8px 0;
-                        border-radius: 20px; font-size: 14px;
-                        border: 1px solid rgba(255,255,255,0.9);
-                        box-shadow: 0 2px 5px rgba(0,0,0,0.04);
-                    }}
+                    {common_css}
+                    .card {{ max-width: 900px; }}
                 </style>
             </head>
             <body>
-                <div class="glass-container">
+                <div class="card">
                     <div class="header">
                         <div class="title">{statement["title"]}</div>
-                        <div class="subtitle">Codeforces {contest_id}{index} · 难度分: {rating}</div>
+                        <div class="subtitle">Codeforces {contest_id}{index} · 难度分：{rating}</div>
                     </div>
+
                     <div class="info-bar">
                         <div class="info-item">
-                            <span class="info-label">时间限制</span>
-                            <span class="info-value">{statement["time_limit"]}</span>
+                            <svg class="info-icon" viewBox="0 0 24 24" fill="none"
+                                 stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"/>
+                                <polyline points="12 6 12 12 16 14"/>
+                            </svg>
+                            <div class="info-text">
+                                <span class="info-label">时间限制</span>
+                                <span class="info-value">{statement["time_limit"]}</span>
+                            </div>
                         </div>
                         <div class="info-item">
-                            <span class="info-label">内存限制</span>
-                            <span class="info-value">{statement["memory_limit"]}</span>
+                            <svg class="info-icon" viewBox="0 0 24 24" fill="none"
+                                 stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="3" width="20" height="14" rx="2"/>
+                                <line x1="8" y1="21" x2="16" y2="21"/>
+                                <line x1="12" y1="17" x2="12" y2="21"/>
+                            </svg>
+                            <div class="info-text">
+                                <span class="info-label">内存限制</span>
+                                <span class="info-value">{statement["memory_limit"]}</span>
+                            </div>
                         </div>
                     </div>
+
                     <div class="section-title">题目描述</div>
                     <div class="cf-content">{description}</div>
                     <div class="section-title">输入格式</div>
                     <div class="cf-content">{input_spec}</div>
                     <div class="section-title">输出格式</div>
                     <div class="cf-content">{output_spec}</div>
-                    {samples_html}
-                    {note_html}
-                    <div class="tags">
-                        <strong>标签：</strong><br>{tags_html}
+                    {note_html_str}
+
+                    <div class="samples-section">
+                        <div class="samples-title">✦ 样例</div>
+                        {samples_html}
                     </div>
+
+                    <div class="tags">
+                        <span class="tags-label">标签：</span><br>{tags_html}
+                    </div>
+
+                    <img class="corner-image" src="{corner_image_url}" alt="decoration"/>
                 </div>
             </body>
             </html>
